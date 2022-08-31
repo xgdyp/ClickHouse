@@ -339,7 +339,7 @@ struct LineChange
 
         const char * pos = full_line.data();
         const char * end = pos + full_line.size();
-
+        //处理空格数量
         while (pos < end)
         {
             if (*pos == ' ')
@@ -352,6 +352,7 @@ struct LineChange
         }
 
         indent = std::max(255U, num_spaces);
+        //
         line.assign(pos, end);
 
         if (pos == end)
@@ -376,6 +377,7 @@ struct LineChange
                 }
                 ++pos;
             }
+            //
             if (pos == end)
                 line_type = LineType::Punct;
         }
@@ -615,6 +617,8 @@ struct FileBlame
         *this = rhs;
     }
 
+
+    // what's this 
     /// Move iterator to requested line or stop at the end.
     void walk(uint32_t num)
     {
@@ -697,6 +701,9 @@ void updateSnapshot(Snapshot & snapshot, const Commit & commit, CommitDiff & fil
         {
             if (line_change.sign == -1)
             {
+                //这里注意：lines是链表
+                //改了别的地方行号可能会变
+                //如果再line前面变 那么要处理下
                 if (const Commit * prev_commit = file_snapshot.find(line_change.line_number_old);
                     prev_commit && prev_commit->time <= commit.time)
                 {
@@ -899,11 +906,15 @@ void processDiffs(
     size_t diff_size = 0;
     while (!in.eof())
     {
+        //开始的标志是@@
         if (checkString("@@ ", in))
         {
+
             if (!file_change_and_line_changes)
             {
+                //处理文件名 
                 auto file_name = new_file_path.empty() ? old_file_path : new_file_path;
+                //
                 auto it = file_changes.find(file_name);
                 if (file_changes.end() != it)
                     file_change_and_line_changes = &it->second;
@@ -913,7 +924,10 @@ void processDiffs(
             {
                 uint32_t old_lines = 1;
                 uint32_t new_lines = 1;
-
+                //@@ -8,10 +8,9 @@ We can use ClickHouse online service with full data access to make ClikcHouse sa
+                //这种情况下处理git hunk的内容
+                // -8,10 代表原来的处理方式
+                // +8,9  代表现在的添加内容
                 assertChar('-', in);
                 readText(line_change.hunk_start_line_number_old, in);
                 if (checkChar(',', in))
@@ -926,6 +940,8 @@ void processDiffs(
 
                 /// This is needed to simplify the logic of updating snapshot:
                 /// When all lines are removed we can treat it as repeated removal of line with number 1.
+                //处理@@ -1,8 +0,0 @@ 这种的情况
+                //把 lno new设置成为1 可以避免0的这种情况
                 if (line_change.hunk_start_line_number_new == 0)
                     line_change.hunk_start_line_number_new = 1;
 
@@ -959,6 +975,7 @@ void processDiffs(
                 }
             }
         }
+        //--- 代表变化的文件
         else if (checkChar('-', in))
         {
             if (checkString("-- ", in))
@@ -982,6 +999,10 @@ void processDiffs(
             else
             {
                 ++diff_size;
+                //处理 删除行的情况
+                // 类似于
+                //-      "OpenDigger has 77 labels with 5 types\n"
+
                 if (file_change_and_line_changes)
                 {
                     ++commit.lines_deleted;
@@ -989,6 +1010,7 @@ void processDiffs(
 
                     line_change.sign = -1;
                     readStringUntilNextLine(line_change.line, in);
+
                     line_change.setLineInfo(line_change.line);
 
                     file_change_and_line_changes->line_changes.push_back(line_change);
@@ -996,6 +1018,7 @@ void processDiffs(
                 }
             }
         }
+        // 同样处理+的文推荐
         else if (checkChar('+', in))
         {
             if (checkString("++ ", in))
@@ -1033,12 +1056,13 @@ void processDiffs(
                 }
             }
         }
+        //其他的情况一律过掉
         else
         {
             /// Unknown lines are ignored.
             skipUntilNextLine(in);
         }
-
+        //如果太大了 这个就不要了
         if (size_limit && diff_size > *size_limit)
         {
             return;
@@ -1049,6 +1073,7 @@ void processDiffs(
 
 /** Process the "git show" result for a single commit. Append the result to tables.
   */
+  //处理commit数据
 void processCommit(
     ReadBuffer & in,
     const Options & options,
@@ -1090,8 +1115,11 @@ void processCommit(
         assertChar('\n', in);
 
     CommitDiff file_changes;
+    //先处理file change 
+
     processFileChanges(in, options, commit, file_changes);
 
+    //再处理具体的diff细节
     if (!in.eof())
     {
         assertChar('\n', in);
